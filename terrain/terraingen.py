@@ -3,7 +3,7 @@ import numpy as np
 import noise
 import cv2
 
-from PIL import Image
+from PIL import Image, ImageFilter
 
 
 class TerrainGen:
@@ -36,7 +36,7 @@ class TerrainGen:
 
         self.normalize_terrain()
 
-    def trigon_noise(self, factors=35, stepsize=0.02):
+    def trigon_noise(self, factors=5, stepsize=0.003):
         factors = np.random.random((len(self.terrain), factors)) * 2 - 1
         for rindex, row in enumerate(self.terrain):
             for cindex, val in enumerate(row):
@@ -99,8 +99,11 @@ class TerrainGen:
         return factors
 
     def save(self):
-        # rgb = Image.fromarray(self.terrain)
+        rgb = Image.fromarray(self.terrain)
+        # rgb = rgb.filter(ImageFilter.BLUR)
+        rgb.show()
         cv2.imwrite("map.png", self.terrain)
+
         # cv2.imwrite("map", rgb.tobytes())
 
     def extract(self):
