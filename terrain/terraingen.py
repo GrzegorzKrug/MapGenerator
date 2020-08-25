@@ -89,14 +89,14 @@ class TerrainGen:
             print(offsetx, offsety)
 
         mountain = self.get_perlin_noise(0.4, step_size, seed, offsetx, offsety) * 255
-        rocks = self.get_perlin_noise(0.03, step_size * 8, seed + 1, offsetx, offsety) * 255
+        rocks = self.get_perlin_noise(0.03, step_size * 4, seed + 1, offsetx, offsety) * 255
         river = self.get_perlin_noise(0.8, step_size/2, seed + 2, offsetx, offsety) * 255
 
         self.components = dict(mountain=mountain, rocks=rocks, river=river)
         self.terrain = self.create_blank(0.5) + mountain + rocks - river
         self.rgb = self.get_color_map(self.terrain)
 
-    def get_color_map(self, terrain, water_volume=0.25, grass_volume=0.45, rock_volume=0.25):
+    def get_color_map(self, terrain, water_volume=0.2, grass_volume=0.5, rock_volume=0.2):
         rgb_map = self.create_blank(chanels=3) + terrain
         rav = terrain.copy().ravel()
         rav.sort()
@@ -188,5 +188,5 @@ class TerrainGen:
 
 if __name__ == "__main__":
     g1 = TerrainGen(300, 300)
-    g1.create_perlin(step_size=0.003)
+    g1.create_perlin(step_size=0.008)
     g1.save()
