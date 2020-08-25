@@ -7,7 +7,7 @@ from PIL import Image, ImageFilter
 
 
 class TerrainGen:
-    def __init__(self, width=500, height=500):
+    def __init__(self, width=1500, height=1500):
         self.width = width
         self.height = height
         self.terrain = None
@@ -24,7 +24,8 @@ class TerrainGen:
 
     def create_trigon(self):
         self.create_random()
-        self.trigon_noise()
+        for x in range(1, 10):
+            self.trigon_noise(factors=x, stepsize=x / 300)
         self.normalize_terrain()
 
     def create_my_map(self):
@@ -36,12 +37,15 @@ class TerrainGen:
 
         self.normalize_terrain()
 
-    def trigon_noise(self, factors=5, stepsize=0.003):
-        factors = np.random.random((len(self.terrain), factors)) * 2 - 1
-        for rindex, row in enumerate(self.terrain):
-            for cindex, val in enumerate(row):
-                val = self.get_sin_x(*factors[rindex], x0=cindex, stepsize=stepsize)
-                self.terrain[rindex, cindex] = val
+    def trigon_noise(self, factors=8, stepsize=1e-3, start_point=1e6):
+        factors = np.random.random((2, factors)) * 2 - 1
+        xval = [self.get_sin_x(*factors[0], x0=start_point + i, stepsize=stepsize) for i in range(self.width)]
+        yval = [self.get_sin_x(*factors[1], x0=start_point + i, stepsize=stepsize) for i in range(self.height)]
+
+        XX, YY = np.meshgrid(xval, yval)
+        ZZ = XX * YY
+
+        self.terrain += ZZ
 
     def get_sin_x(self, *coeffs, x0, stepsize, ):
         out = 0
@@ -49,7 +53,7 @@ class TerrainGen:
             if rank == 0:
                 out = cf
             else:
-                out += np.sin(x0 / cf * stepsize) ** rank
+                out += np.sin((x0 * stepsize) ** cf)
         return out
 
     def moving_filter_1d(self, series, kernel):
@@ -82,6 +86,10 @@ class TerrainGen:
         self.terrain = self.terrain - self.terrain.min()
         self.terrain = self.terrain / self.terrain.max() * 255
 
+    def normalize_terrain_2(self):
+        self.terrain = self.terrain - self.terrain.min()
+        self.terrain = self.terrain * 255
+
     def my_noise(self, factor_ammount=100):
         factors = np.random.random(factor_ammount) * 2 - 1
         f_sum = np.sum(factors)
@@ -99,18 +107,14 @@ class TerrainGen:
         return factors
 
     def save(self):
-        rgb = Image.fromarray(self.terrain)
-        # rgb = rgb.filter(ImageFilter.BLUR)
-        rgb.show()
-        cv2.imwrite("map.png", self.terrain)
-
-        # cv2.imwrite("map", rgb.tobytes())
+        im = cv2.GaussianBlur(self.terrain, (11, 11), 20)
+        cv2.imwrite("map.png", im)
 
     def extract(self):
         raise NotImplemented
 
 
 if __name__ == "__main__":
-    g1 = TerrainGen()
+    g1 = TerrainGen(300, 300)
     g1.create_trigon()
     g1.save()
