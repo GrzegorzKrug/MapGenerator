@@ -11,14 +11,14 @@ class TerrainGen:
     def __init__(self, width=1500, height=1500):
         self.width = width
         self.height = height
+
         self.terrain = None
-        self.red = None
-        self.green = None
-        self.blue = None
+        self.rgb = None
+        self.components = dict()
         self.terrain = self.create_blank()
 
-    def create_blank(self, chanels=1):
-        blank = np.zeros((self.width, self.height, chanels))
+    def create_blank(self, value=0, chanels=1):
+        blank = np.zeros((self.width, self.height, chanels)) + value
         return blank
 
     def create_random(self):
@@ -90,12 +90,38 @@ class TerrainGen:
 
         mountain = self.get_perlin_noise(0.4, step_size, seed, offsetx, offsety) * 255
         rocks = self.get_perlin_noise(0.03, step_size * 8, seed + 1, offsetx, offsety) * 255
-        river = self.get_perlin_noise(0.8, step_size, seed + 2, offsetx, offsety) * 255
+        river = self.get_perlin_noise(0.8, step_size/2, seed + 2, offsetx, offsety) * 255
 
-        self.red = mountain
-        self.green = rocks
-        self.blue = river
-        self.terrain = self.create_blank() + 0.5 + mountain + rocks - river
+        self.components = dict(mountain=mountain, rocks=rocks, river=river)
+        self.terrain = self.create_blank(0.5) + mountain + rocks - river
+        self.rgb = self.get_color_map(self.terrain)
+
+    def get_color_map(self, terrain, water_volume=0.15, grass_volume=0.55, rock_volume=0.25):
+        rgb_map = self.create_blank(chanels=3) + terrain
+        rav = terrain.copy().ravel()
+        rav.sort()
+        target_water = int(len(rav) * water_volume)
+        target_grass = int(target_water + len(rav) * grass_volume)
+        target_rock = int(target_grass + len(rav) * rock_volume)
+
+        water_height = rav[target_water]
+        grass_height = rav[target_grass]
+        rock_height = rav[target_rock]
+        del rav
+
+        for rindex, row in enumerate(terrain):
+            for cindex, val in enumerate(row):
+                if val <= water_height:
+                    rgb_map[rindex, cindex, 0] = 255
+                elif val <= grass_height:
+                    rgb_map[rindex, cindex, 1] = 255
+                elif val <= rock_height:
+                    rgb_map[rindex, cindex, :] = 125
+                else:
+                    rgb_map[rindex, cindex, :] = 255
+
+        rgb_map = self.normalize_terrain(rgb_map)
+        return rgb_map
 
     def get_perlin_noise(self, amplitude, step_size, seed, offsetx, offsety):
         noise_map = self.create_blank()
@@ -116,10 +142,10 @@ class TerrainGen:
         terrain = terrain / terrain.max() * (maximal_val - minimal_val) + minimal_val
         return terrain
 
-    def normalize_terrain_3d(self):
-        self.red = self.normalize_terrain(self.red)
-        self.green = self.normalize_terrain(self.green)
-        self.blue = self.normalize_terrain(self.blue)
+    # def normalize_terrain_3d(self):
+    #     self.red = self.normalize_terrain(self.red)
+    #     self.green = self.normalize_terrain(self.green)
+    #     self.blue = self.normalize_terrain(self.blue)
 
     def my_noise(self, factor_ammount=100):
         factors = np.random.random(factor_ammount) * 2 - 1
@@ -141,17 +167,20 @@ class TerrainGen:
         self.terrain = cv2.GaussianBlur(self.terrain, (15, 15), 10)
 
     def save(self):
-        # self.normalize_terrain_3d()
-        im = np.concatenate([self.red, self.green, self.blue], axis=-1)
-        rgb = self.normalize_terrain(im)
-        self.terrain = self.normalize_terrain(self.terrain)
+        terrain = self.normalize_terrain(self.terrain)
+        terrain = np.concatenate([terrain] * 3, axis=-1)
+        if self.rgb is not None:
+            cv2.imwrite("map_rgb.png", self.rgb)
+            print(terrain.shape)
+            stacked = np.concatenate([self.rgb, terrain], axis=0)
+            print(stacked.shape)
+        else:
+            stacked = self.terrain
 
-        rgb = np.array(rgb, dtype=np.uint8)
-        cv2.imwrite("map_rgb.png", rgb)
-        cv2.imwrite("map.png", self.terrain)
-        cv2.imwrite("map_red.png", self.red)
-        cv2.imwrite("map_blue.png", self.blue)
-        cv2.imwrite("map_green.png", self.green)
+        cv2.imwrite("stacked.png", stacked)
+
+        for name, im in self.components.items():
+            cv2.imwrite(f"map_{name}.png", im)
 
     def extract(self):
         raise NotImplemented
