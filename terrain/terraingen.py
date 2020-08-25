@@ -13,12 +13,10 @@ def GaussianKernel(size=11):
     for ind, row in enumerate(arr):
         for cind, col in enumerate(row):
             distance = np.abs(padding - ind) + np.abs(padding - cind)
-            # print(ind, cind, distance)
-            arr[ind, cind] = 2 * (size - distance)
+            distance = distance
+
+            arr[ind, cind] = (2 * size - distance)
     return arr
-
-
-# from PIL import Image, ImageFilter
 
 
 class TerrainGen:
@@ -82,10 +80,10 @@ class TerrainGen:
         self.terrain = self.normalize_terrain(terrain)
 
         self.rgb = self.get_color_map(self.terrain)
-        debug = self.work_on_terrain(self.rgb, self.terrain)
-        rgb2 = self.get_color_map(debug)
+        new_terrain = self.work_on_terrain(self.rgb, self.terrain)
+        rgb2 = self.get_color_map(new_terrain)
 
-        debug = np.concatenate([debug, debug, debug], -1)
+        debug = np.concatenate([new_terrain, new_terrain, new_terrain], -1)
         self.components['debug'] = debug
         self.components['rgb_better'] = rgb2
 
@@ -100,20 +98,44 @@ class TerrainGen:
         2d np.array
         """
         mask = self.create_blank(chanels=1)
-
         for rindex, row in enumerate(rgb_map):
             for cindex, (blue, green, red) in enumerate(row):
                 if blue >= 10 and (red <= 10 or green <= 10):
                     mask[rindex, cindex, 0] = 255
-        new_terrain = self.apply_filter(terrain, GaussianKernel(33), mask)
-
+        mask = self.expand_mask(mask, 20)
+        new_terrain = self.apply_filter(terrain, GaussianKernel(55), mask)
+        new_terrain = self.apply_filter(new_terrain, GaussianKernel(11), mask)
         return new_terrain
+
+    def expand_mask(self, mask, dist=5):
+        new_mask = mask.copy()
+        for rindex, row in enumerate(mask):
+            for cindex, val in enumerate(row):
+                if val < 1:
+                    continue
+                else:
+                    rstart = rindex - dist
+                    rstop = rindex + dist + 1
+                    if rstart < 0:
+                        rstart = 0
+
+                    if rindex > self.height - 1:
+                        rstop = self.height - 1
+
+                    cstart = cindex - dist
+                    cstop = cindex + dist + 1
+                    if cstart < 0:
+                        cstart = 0
+
+                    if cindex > self.width - 1:
+                        cstop = self.width - 1
+
+                new_mask[rstart:rstop, cstart:cstop] = 255
+        return new_mask
 
     def apply_filter(self, terrain, kernel, mask=None):
         output = terrain.copy()
         application = self.create_blank(chanels=3)
-        print(mask.shape)
-        print(application.shape)
         application[:, :, 0] = mask[:, :, 0]
 
         if mask is None:
@@ -130,21 +152,21 @@ class TerrainGen:
         factor = kernel.sum()
         padding_vert = kernel.shape[0] // 2
         padding_hor = kernel.shape[1] // 2
-        # print(padding_vert, padding_hor)
+
         for rindex, (row, mask_row) in enumerate(zip(
                 terrain[padding_vert:-padding_vert], mask[padding_vert:]), padding_vert):
+
             row_indexes = slice(rindex - padding_vert, rindex + padding_vert + 1)
             for cindex, (height, msk) in enumerate(zip(
                     row[padding_hor:-padding_hor], mask_row[padding_hor:]), padding_hor):
                 col_indexes = slice(cindex - padding_hor, cindex + padding_hor + 1)
-
                 if msk < 1:
                     continue
                 else:
                     scrap = terrain[row_indexes, col_indexes, 0]
                     application[rindex, cindex, 1] = 255
                     val = (scrap * kernel).sum() / factor
-                output[rindex, cindex] = val
+                output[rindex, cindex, 0] = val
         self.components['application'] = application
 
         return output
@@ -253,12 +275,13 @@ class TerrainGen:
         else:
             stacked = terrain_rgb
 
-        if 'debug' in self.components:
-            stacked = np.concatenate([stacked, self.components['debug']], axis=1)
-        if 'rgb_better' in self.components:
-            stacked = np.concatenate([stacked, self.components['rgb_better']], axis=1)
+        if 'rgb_better' in self.components and 'debug' in self.components:
+            layer = np.concatenate([self.components['rgb_better'], self.components['debug']], axis=1)
+            stacked = np.concatenate([stacked, layer], axis=0)
 
-        print(stacked.shape)
+        elif 'debug' in self.components:
+            stacked = np.concatenate([stacked, self.components['debug']], axis=1)
+
         cv2.imwrite("stacked.png", stacked)
         cv2.imwrite("map.png", self.terrain)
 
