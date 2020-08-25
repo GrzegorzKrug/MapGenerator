@@ -96,7 +96,7 @@ class TerrainGen:
         self.terrain = self.create_blank(0.5) + mountain + rocks - river
         self.rgb = self.get_color_map(self.terrain)
 
-    def get_color_map(self, terrain, water_volume=0.15, grass_volume=0.55, rock_volume=0.25):
+    def get_color_map(self, terrain, water_volume=0.25, grass_volume=0.45, rock_volume=0.25):
         rgb_map = self.create_blank(chanels=3) + terrain
         rav = terrain.copy().ravel()
         rav.sort()
