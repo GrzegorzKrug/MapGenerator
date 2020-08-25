@@ -19,13 +19,11 @@ class TerrainGen:
     def create_random(self):
         self.terrain = np.random.random((self.width, self.height))
 
-    def create_new(self):
-        self.create_my_map()
-
     def create_trigon(self):
         self.create_random()
         for x in range(1, 10):
-            self.trigon_noise(factors=x, stepsize=x / 300)
+            self.add_trigon_noise(factors=x + 3, stepsize=x / 500)
+        self.blur_terrain()
         self.normalize_terrain()
 
     def create_my_map(self):
@@ -37,7 +35,7 @@ class TerrainGen:
 
         self.normalize_terrain()
 
-    def trigon_noise(self, factors=8, stepsize=1e-3, start_point=1e6):
+    def add_trigon_noise(self, factors=8, stepsize=1e-3, start_point=1e6):
         factors = np.random.random((2, factors)) * 2 - 1
         xval = [self.get_sin_x(*factors[0], x0=start_point + i, stepsize=stepsize) for i in range(self.width)]
         yval = [self.get_sin_x(*factors[1], x0=start_point + i, stepsize=stepsize) for i in range(self.height)]
@@ -82,9 +80,9 @@ class TerrainGen:
                 n = noise.pnoise2(rindex / step_size, cindex / step_size, base=base)
                 self.terrain[rindex, cindex] = val + n
 
-    def normalize_terrain(self):
+    def normalize_terrain(self, minimal_val=0, maximal_val=255):
         self.terrain = self.terrain - self.terrain.min()
-        self.terrain = self.terrain / self.terrain.max() * 255
+        self.terrain = self.terrain / self.terrain.max() * (maximal_val - minimal_val) + minimal_val
 
     def normalize_terrain_2(self):
         self.terrain = self.terrain - self.terrain.min()
@@ -106,9 +104,14 @@ class TerrainGen:
         print(f"Steps taken to get factors: {steps}, sum: {f_sum}")
         return factors
 
+    def blur_terrain(self):
+        self.terrain = cv2.GaussianBlur(self.terrain, (15, 15), 10)
+
     def save(self):
-        im = cv2.GaussianBlur(self.terrain, (11, 11), 20)
-        cv2.imwrite("map.png", im)
+        # im = np.stack([red, green, blue], axis=-1)
+        im = np.array(self.terrain, dtype=np.uint8)
+        im = cv2.cvtColor(im, cv2.COLOR_GRAY2RGB)
+        cv2.imwrite("map_rgb.png", im)
 
     def extract(self):
         raise NotImplemented
