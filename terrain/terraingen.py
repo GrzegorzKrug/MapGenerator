@@ -4,6 +4,20 @@ import noise
 import cv2
 
 
+# GAUSSIAN_KERNEL = np.array([[1, 2, 1], [2, 4, 2], [1, 2, 1]])
+
+
+def GaussianKernel(size=11):
+    arr = np.zeros((size, size))
+    padding = size // 2
+    for ind, row in enumerate(arr):
+        for cind, col in enumerate(row):
+            distance = np.abs(padding - ind) + np.abs(padding - cind)
+            # print(ind, cind, distance)
+            arr[ind, cind] = 2 * (size - distance)
+    return arr
+
+
 # from PIL import Image, ImageFilter
 
 
@@ -29,7 +43,7 @@ class TerrainGen:
         for x in range(1, 11):
             self.add_trigon_noise(factors=x + 1,
                                   stepsize=1e-3, amplitude=10 / x)
-        self.blur_terrain()
+        self.terrain = self.blur_terrain(self.terrain)
         self.terrain = self.normalize_terrain()
 
     def create_my_map(self):
@@ -51,16 +65,89 @@ class TerrainGen:
 
         self.terrain += ZZ * amplitude
 
-    def get_sin_x(self, *coeffs, x0, stepsize, ):
-        out = 0
-        for rank, cf in enumerate(coeffs):
-            if rank == 0:
-                out = cf
-            else:
-                out += np.sin((x0 * stepsize) ** cf) / rank
-        if out > 1:
-            out = 1
-        return out
+    def create_perlin(self, step_size=0.1, seed=None, offsetx=0, offsety=0):
+        if seed is None:
+            seed = np.random.randint(0, 1e3)
+
+        if offsetx == 0 and offsety == 0:
+            offsetx, offsety = np.random.randint(0, 1e4, 2)
+            print(offsetx, offsety)
+
+        mountain = self.get_perlin_noise(0.4, step_size, seed, offsetx, offsety) * 255
+        rocks = self.get_perlin_noise(0.03, step_size * 4, seed + 1, offsetx, offsety) * 255
+        river = self.get_perlin_noise(0.8, step_size / 2, seed + 2, offsetx, offsety) * 255
+
+        self.components = dict(mountain=mountain, rocks=rocks, river=river)
+        terrain = self.create_blank(0.5) + mountain + rocks - river
+        self.terrain = self.normalize_terrain(terrain)
+
+        self.rgb = self.get_color_map(self.terrain)
+        debug = self.work_on_terrain(self.rgb, self.terrain)
+        rgb2 = self.get_color_map(debug)
+
+        debug = np.concatenate([debug, debug, debug], -1)
+        self.components['debug'] = debug
+        self.components['rgb_better'] = rgb2
+
+    def work_on_terrain(self, rgb_map, terrain) -> 'List 2d Terrain':
+        """
+
+        Args:
+            rgb_map:
+            terrain:
+
+        Returns:
+        2d np.array
+        """
+        mask = self.create_blank(chanels=1)
+
+        for rindex, row in enumerate(rgb_map):
+            for cindex, (blue, green, red) in enumerate(row):
+                if blue >= 10 and (red <= 10 or green <= 10):
+                    mask[rindex, cindex, 0] = 255
+        new_terrain = self.apply_filter(terrain, GaussianKernel(33), mask)
+
+        return new_terrain
+
+    def apply_filter(self, terrain, kernel, mask=None):
+        output = terrain.copy()
+        application = self.create_blank(chanels=3)
+        print(mask.shape)
+        print(application.shape)
+        application[:, :, 0] = mask[:, :, 0]
+
+        if mask is None:
+            mask = self.create_blank(0)
+
+        if not len(kernel) % 2:
+            print(f"Dimension row is even: {len(kernel)}")
+            return output
+
+        if not len(kernel[0]) % 2:
+            print(f"Dimension of columns is even: {len(kernel[0])}")
+            return output
+
+        factor = kernel.sum()
+        padding_vert = kernel.shape[0] // 2
+        padding_hor = kernel.shape[1] // 2
+        # print(padding_vert, padding_hor)
+        for rindex, (row, mask_row) in enumerate(zip(
+                terrain[padding_vert:-padding_vert], mask[padding_vert:]), padding_vert):
+            row_indexes = slice(rindex - padding_vert, rindex + padding_vert + 1)
+            for cindex, (height, msk) in enumerate(zip(
+                    row[padding_hor:-padding_hor], mask_row[padding_hor:]), padding_hor):
+                col_indexes = slice(cindex - padding_hor, cindex + padding_hor + 1)
+
+                if msk < 1:
+                    continue
+                else:
+                    scrap = terrain[row_indexes, col_indexes, 0]
+                    application[rindex, cindex, 1] = 255
+                    val = (scrap * kernel).sum() / factor
+                output[rindex, cindex] = val
+        self.components['application'] = application
+
+        return output
 
     def moving_filter_1d(self, series, kernel):
         # new_series = []
@@ -80,34 +167,28 @@ class TerrainGen:
         # print(new_series)
         return np.array(series)
 
-    def create_perlin(self, step_size=0.1, seed=None, offsetx=0, offsety=0):
-        if seed is None:
-            seed = np.random.randint(0, 1e3)
-
-        if offsetx == 0 and offsety == 0:
-            offsetx, offsety = np.random.randint(0, 1e4, 2)
-            print(offsetx, offsety)
-
-        mountain = self.get_perlin_noise(0.4, step_size, seed, offsetx, offsety) * 255
-        rocks = self.get_perlin_noise(0.03, step_size * 4, seed + 1, offsetx, offsety) * 255
-        river = self.get_perlin_noise(0.8, step_size/2, seed + 2, offsetx, offsety) * 255
-
-        self.components = dict(mountain=mountain, rocks=rocks, river=river)
-        self.terrain = self.create_blank(0.5) + mountain + rocks - river
-        self.rgb = self.get_color_map(self.terrain)
+    def get_sin_x(self, *coeffs, x0, stepsize, ):
+        out = 0
+        for rank, cf in enumerate(coeffs):
+            if rank == 0:
+                out = cf
+            else:
+                out += np.sin((x0 * stepsize) ** cf) / rank
+        if out > 1:
+            out = 1
+        return out
 
     def get_color_map(self, terrain, water_volume=0.2, grass_volume=0.5, rock_volume=0.2):
-        rgb_map = self.create_blank(chanels=3) + terrain
+        rgb_map = self.create_blank(chanels=3)
+
         rav = terrain.copy().ravel()
         rav.sort()
         target_water = int(len(rav) * water_volume)
         target_grass = int(target_water + len(rav) * grass_volume)
         target_rock = int(target_grass + len(rav) * rock_volume)
-
         water_height = rav[target_water]
         grass_height = rav[target_grass]
         rock_height = rav[target_rock]
-        del rav
 
         for rindex, row in enumerate(terrain):
             for cindex, val in enumerate(row):
@@ -142,12 +223,8 @@ class TerrainGen:
         terrain = terrain / terrain.max() * (maximal_val - minimal_val) + minimal_val
         return terrain
 
-    # def normalize_terrain_3d(self):
-    #     self.red = self.normalize_terrain(self.red)
-    #     self.green = self.normalize_terrain(self.green)
-    #     self.blue = self.normalize_terrain(self.blue)
-
-    def my_noise(self, factor_ammount=100):
+    @staticmethod
+    def my_noise(factor_ammount=100):
         factors = np.random.random(factor_ammount) * 2 - 1
         f_sum = np.sum(factors)
         steps = 0
@@ -163,30 +240,36 @@ class TerrainGen:
         print(f"Steps taken to get factors: {steps}, sum: {f_sum}")
         return factors
 
-    def blur_terrain(self):
-        self.terrain = cv2.GaussianBlur(self.terrain, (15, 15), 10)
+    def blur_terrain(self, terrain):
+        terrain = cv2.GaussianBlur(terrain, (15, 15), 10)
+        return terrain
 
     def save(self):
-        terrain = self.normalize_terrain(self.terrain)
-        terrain = np.concatenate([terrain] * 3, axis=-1)
+        terrain_rgb = np.concatenate([self.terrain] * 3, axis=-1)
+
         if self.rgb is not None:
             cv2.imwrite("map_rgb.png", self.rgb)
-            print(terrain.shape)
-            stacked = np.concatenate([self.rgb, terrain], axis=0)
-            print(stacked.shape)
+            stacked = np.concatenate([self.rgb, terrain_rgb], axis=1)
         else:
-            stacked = self.terrain
+            stacked = terrain_rgb
 
+        if 'debug' in self.components:
+            stacked = np.concatenate([stacked, self.components['debug']], axis=1)
+        if 'rgb_better' in self.components:
+            stacked = np.concatenate([stacked, self.components['rgb_better']], axis=1)
+
+        print(stacked.shape)
         cv2.imwrite("stacked.png", stacked)
+        cv2.imwrite("map.png", self.terrain)
 
         for name, im in self.components.items():
-            cv2.imwrite(f"map_{name}.png", im)
+            cv2.imwrite(f"{name}.png", im)
 
     def extract(self):
         raise NotImplemented
 
 
 if __name__ == "__main__":
-    g1 = TerrainGen(300, 300)
+    g1 = TerrainGen(400, 400)
     g1.create_perlin(step_size=0.008)
     g1.save()
