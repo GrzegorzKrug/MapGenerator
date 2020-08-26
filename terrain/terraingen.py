@@ -1,10 +1,12 @@
 # import matplotlib.pyplot as plt
 import numpy as np
 import noise
+import time
 import cv2
 
-
 # GAUSSIAN_KERNEL = np.array([[1, 2, 1], [2, 4, 2], [1, 2, 1]])
+global function_stats
+function_stats = dict()
 
 
 def GaussianKernel(size=11):
@@ -17,6 +19,24 @@ def GaussianKernel(size=11):
 
             arr[ind, cind] = (2 * size - distance)
     return arr
+
+
+def timeit(fun):
+    def wrapper(*args, **kwargs):
+        global function_stats
+        name = fun.__name__
+        time0 = time.time()
+        value = fun(*args, **kwargs)
+        timend = time.time()
+
+        dur_s = (timend - time0)
+        records = function_stats.get(name, [])
+        records.append(dur_s)
+        function_stats[name] = records
+        # print(f"{fun.__name__:<20} took: {dur_s:>05.2f} s")
+        return value
+
+    return wrapper
 
 
 class TerrainGen:
@@ -33,9 +53,11 @@ class TerrainGen:
         blank = np.zeros((self.width, self.height, chanels)) + value
         return blank
 
+    @timeit
     def create_random(self):
         self.terrain = np.random.random((self.width, self.height))
 
+    @timeit
     def create_trigon(self):
         self.create_random()
         for x in range(1, 11):
@@ -44,6 +66,7 @@ class TerrainGen:
         self.terrain = self.blur_terrain(self.terrain)
         self.terrain = self.normalize_terrain()
 
+    @timeit
     def create_my_map(self):
         self.terrain = self.create_blank()
         noise = self.my_noise()
@@ -53,6 +76,7 @@ class TerrainGen:
 
         self.terrain = self.normalize_terrain()
 
+    @timeit
     def add_trigon_noise(self, factors=2, stepsize=1e-3, start_point=1e6, amplitude=1.0):
         factors = np.random.random((2, factors)) * 2 - 1
         xval = [self.get_sin_x(*factors[0], x0=start_point + i, stepsize=stepsize) for i in range(self.width)]
@@ -63,13 +87,14 @@ class TerrainGen:
 
         self.terrain += ZZ * amplitude
 
+    @timeit
     def create_perlin(self, step_size=0.1, seed=None, offsetx=0, offsety=0):
         if seed is None:
             seed = np.random.randint(0, 1e3)
 
         if offsetx == 0 and offsety == 0:
             offsetx, offsety = np.random.randint(0, 1e4, 2)
-            print(offsetx, offsety)
+            print(f"Random offset: {offsetx}, {offsety}")
 
         mountain = self.get_perlin_noise(0.4, step_size, seed, offsetx, offsety) * 255
         rocks = self.get_perlin_noise(0.03, step_size * 4, seed + 1, offsetx, offsety) * 255
@@ -87,6 +112,7 @@ class TerrainGen:
         self.components['debug'] = debug
         self.components['rgb_better'] = rgb2
 
+    @timeit
     def work_on_terrain(self, rgb_map, terrain) -> 'List 2d Terrain':
         """
 
@@ -107,6 +133,7 @@ class TerrainGen:
         new_terrain = self.apply_filter(new_terrain, GaussianKernel(11), mask)
         return new_terrain
 
+    @timeit
     def expand_mask(self, mask, dist=5):
         new_mask = mask.copy()
         for rindex, row in enumerate(mask):
@@ -133,6 +160,7 @@ class TerrainGen:
                 new_mask[rstart:rstop, cstart:cstop] = 255
         return new_mask
 
+    @timeit
     def apply_filter(self, terrain, kernel, mask=None):
         output = terrain.copy()
         application = self.create_blank(chanels=3)
@@ -171,6 +199,7 @@ class TerrainGen:
 
         return output
 
+    @timeit
     def moving_filter_1d(self, series, kernel):
         # new_series = []
         for index, value in enumerate(series):
@@ -189,6 +218,7 @@ class TerrainGen:
         # print(new_series)
         return np.array(series)
 
+    @timeit
     def get_sin_x(self, *coeffs, x0, stepsize, ):
         out = 0
         for rank, cf in enumerate(coeffs):
@@ -200,6 +230,7 @@ class TerrainGen:
             out = 1
         return out
 
+    @timeit
     def get_color_map(self, terrain, water_volume=0.2, grass_volume=0.5, rock_volume=0.2):
         rgb_map = self.create_blank(chanels=3)
 
@@ -226,6 +257,7 @@ class TerrainGen:
         rgb_map = self.normalize_terrain(rgb_map)
         return rgb_map
 
+    @timeit
     def get_perlin_noise(self, amplitude, step_size, seed, offsetx, offsety):
         noise_map = self.create_blank()
         for rindex, row in enumerate(self.terrain):
@@ -236,6 +268,7 @@ class TerrainGen:
                 noise_map[rindex, cindex] = n * amplitude
         return noise_map
 
+    @timeit
     def normalize_terrain(self, terrain=None, minimal_val=0, maximal_val=255):
         terrain = terrain - terrain.min()
 
@@ -262,10 +295,12 @@ class TerrainGen:
         print(f"Steps taken to get factors: {steps}, sum: {f_sum}")
         return factors
 
+    @timeit
     def blur_terrain(self, terrain):
         terrain = cv2.GaussianBlur(terrain, (15, 15), 10)
         return terrain
 
+    @timeit
     def save(self):
         terrain_rgb = np.concatenate([self.terrain] * 3, axis=-1)
 
@@ -293,6 +328,12 @@ class TerrainGen:
 
 
 if __name__ == "__main__":
+    t0 = time.time()
     g1 = TerrainGen(400, 400)
     g1.create_perlin(step_size=0.008)
     g1.save()
+    tend = time.time()
+    for key, records in function_stats.items():
+        print(f"{key:<25} average: {np.mean(records):>4.4f} s")
+
+    print(f"{tend - t0:>4.1f} s")
