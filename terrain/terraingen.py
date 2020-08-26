@@ -40,6 +40,19 @@ def GaussianKernel(size=11):
     return arr
 
 
+# @timeit
+# def DilatationKernel(size=11):
+#     arr = np.zeros((size, size))
+#     padding = size // 2
+#     for ind, row in enumerate(arr):
+#         for cind, col in enumerate(row):
+#             distance = np.abs(padding - ind) + np.abs(padding - cind)
+#             distance = distance
+#
+#             arr[ind, cind] = (2 * size - distance)
+#     return arr
+
+
 class Mask:
     def __init__(self, width, height, mask=None):
         self.width = width
@@ -106,7 +119,7 @@ class TerrainGen:
         self.height = height
 
         self.terrain = None
-        self.rgb = None
+        self.bgr = None
         self.components = dict()
         self.terrain = self.create_blank()
 
@@ -165,33 +178,37 @@ class TerrainGen:
         terrain = self.create_blank(0.5) + mountain + rocks - river
         self.terrain = self.normalize_terrain(terrain)
 
-        self.rgb = self.get_color_map(self.terrain)
-        new_terrain = self.work_on_terrain(self.rgb, self.terrain)
-        rgb2 = self.get_color_map(new_terrain)
+        self.bgr = self.get_color_map(self.terrain)
+        new_terrain = self.work_on_terrain(self.bgr, self.terrain)
+        bgr_new = self.get_color_map(new_terrain)
 
         debug = np.concatenate([new_terrain, new_terrain, new_terrain], -1)
         self.components['debug'] = debug
-        self.components['rgb_better'] = rgb2
+        self.components['map_better'] = bgr_new
 
     @timeit
-    def work_on_terrain(self, rgb_map, terrain) -> 'List 2d Terrain':
+    def work_on_terrain(self, bgr_map, terrain) -> 'List 2d Terrain':
         """
 
         Args:
-            rgb_map:
+            bgr_map:
             terrain:
 
         Returns:
         2d np.array
         """
-        mask = set()
-        for rindex, row in enumerate(rgb_map):
-            for cindex, (blue, green, red) in enumerate(row):
-                if blue >= 10 and (red <= 10 or green <= 10):
-                    mask.add((rindex, cindex))
+        red_mask = bgr_map[:, :, 2] <= 10
+        green_mask = bgr_map[:, :, 1] <= 10
+        blue_mask = bgr_map[:, :, 0] >= 10
 
-        mask_ob = Mask(self.width, self.height, mask)
-        mask_arr = mask_ob.expand(20)
+        mask_bool = np.logical_and(blue_mask, np.logical_or(red_mask, green_mask))
+        mask = mask_bool * 255
+
+        mask = np.array(mask, dtype=np.uint8).reshape(*mask.shape, 1)
+        dil_kernel = cv2.getStructuringElement(cv2.MORPH_DILATE, (5, 5))
+        mask_arr = cv2.dilate(mask, kernel=dil_kernel, iterations=1)
+        mask_arr = mask_arr.reshape(*mask_arr.shape, 1)
+
         new_terrain = self.apply_filter(terrain, GaussianKernel(55), mask_arr)
         new_terrain = self.apply_filter(new_terrain, GaussianKernel(11), mask_arr)
         return new_terrain
@@ -268,7 +285,7 @@ class TerrainGen:
 
     @timeit
     def get_color_map(self, terrain, water_volume=0.2, grass_volume=0.5, rock_volume=0.2):
-        rgb_map = self.create_blank(chanels=3)
+        bgr_map = self.create_blank(chanels=3)
 
         rav = terrain.copy().ravel()
         rav.sort()
@@ -282,16 +299,16 @@ class TerrainGen:
         for rindex, row in enumerate(terrain):
             for cindex, val in enumerate(row):
                 if val <= water_height:
-                    rgb_map[rindex, cindex, 0] = 255
+                    bgr_map[rindex, cindex, 0] = 255
                 elif val <= grass_height:
-                    rgb_map[rindex, cindex, 1] = 255
+                    bgr_map[rindex, cindex, 1] = 255
                 elif val <= rock_height:
-                    rgb_map[rindex, cindex, :] = 125
+                    bgr_map[rindex, cindex, :] = 125
                 else:
-                    rgb_map[rindex, cindex, :] = 255
+                    bgr_map[rindex, cindex, :] = 255
 
-        rgb_map = self.normalize_terrain(rgb_map)
-        return rgb_map
+        bgr_map = self.normalize_terrain(bgr_map)
+        return bgr_map
 
     @timeit
     def get_perlin_noise(self, amplitude, step_size, seed, offsetx, offsety):
@@ -338,16 +355,16 @@ class TerrainGen:
 
     @timeit
     def save(self):
-        terrain_rgb = np.concatenate([self.terrain] * 3, axis=-1)
+        terrain_bgr = np.concatenate([self.terrain] * 3, axis=-1)
 
-        if self.rgb is not None:
-            cv2.imwrite("map_rgb.png", self.rgb)
-            stacked = np.concatenate([self.rgb, terrain_rgb], axis=1)
+        if self.bgr is not None:
+            cv2.imwrite("map_rgb.png", self.bgr)
+            stacked = np.concatenate([self.bgr, terrain_bgr], axis=1)
         else:
-            stacked = terrain_rgb
+            stacked = terrain_bgr
 
-        if 'rgb_better' in self.components and 'debug' in self.components:
-            layer = np.concatenate([self.components['rgb_better'], self.components['debug']], axis=1)
+        if 'map_better' in self.components and 'debug' in self.components:
+            layer = np.concatenate([self.components['map_better'], self.components['debug']], axis=1)
             stacked = np.concatenate([stacked, layer], axis=0)
 
         elif 'debug' in self.components:
