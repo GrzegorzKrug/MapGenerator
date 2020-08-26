@@ -168,7 +168,7 @@ class TerrainGen:
 
         if offsetx == 0 and offsety == 0:
             offsetx, offsety = np.random.randint(0, 1e4, 2)
-            print(f"Random offset: {offsetx}, {offsety}")
+        print(f"Seed: {seed}, Offset: {offsetx}, {offsety}")
 
         mountain = self.get_perlin_noise(0.4, step_size, seed, offsetx, offsety) * 255
         rocks = self.get_perlin_noise(0.03, step_size * 4, seed + 1, offsetx, offsety) * 255
@@ -205,11 +205,12 @@ class TerrainGen:
         mask = mask_bool * 255
 
         mask = np.array(mask, dtype=np.uint8).reshape(*mask.shape, 1)
-        dil_kernel = cv2.getStructuringElement(cv2.MORPH_DILATE, (5, 5))
+        new_terrain = self.apply_filter(terrain, GaussianKernel(33), mask)
+
+        dil_kernel = cv2.getStructuringElement(cv2.MORPH_DILATE, (25, 25))
         mask_arr = cv2.dilate(mask, kernel=dil_kernel, iterations=1)
         mask_arr = mask_arr.reshape(*mask_arr.shape, 1)
 
-        new_terrain = self.apply_filter(terrain, GaussianKernel(55), mask_arr)
         new_terrain = self.apply_filter(new_terrain, GaussianKernel(11), mask_arr)
         return new_terrain
 
