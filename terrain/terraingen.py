@@ -9,18 +9,6 @@ global function_stats
 function_stats = dict()
 
 
-def GaussianKernel(size=11):
-    arr = np.zeros((size, size))
-    padding = size // 2
-    for ind, row in enumerate(arr):
-        for cind, col in enumerate(row):
-            distance = np.abs(padding - ind) + np.abs(padding - cind)
-            distance = distance
-
-            arr[ind, cind] = (2 * size - distance)
-    return arr
-
-
 def timeit(fun):
     def wrapper(*args, **kwargs):
         global function_stats
@@ -39,6 +27,79 @@ def timeit(fun):
     return wrapper
 
 
+@timeit
+def GaussianKernel(size=11):
+    arr = np.zeros((size, size))
+    padding = size // 2
+    for ind, row in enumerate(arr):
+        for cind, col in enumerate(row):
+            distance = np.abs(padding - ind) + np.abs(padding - cind)
+            distance = distance
+
+            arr[ind, cind] = (2 * size - distance)
+    return arr
+
+
+class Mask:
+    def __init__(self, width, height, mask=None):
+        self.width = width
+        self.height = height
+
+        if type(mask) is set:
+            self.mask_pixels = mask
+        elif mask is None:
+            self.mask_pixels = set()
+        else:
+            raise NotImplemented("Accepting only set of [row, col] pixes")
+
+        # elif type(mask) is list or type(mask) is np.ndarray:
+        #     self.mask_array = mask
+        #     self.mask_pixels = self.get_mask_array()
+
+    @timeit
+    def get_mask_array(self):
+        mask = np.zeros((self.width, self.height, 1))
+        for row, col in self.mask_pixels:
+            mask[row, col, 0] = 1
+        return mask
+
+    @timeit
+    def expand(self, dist=5):
+        new_mask_array = np.zeros((self.width, self.height, 1))
+        for rindex, cindex in self.mask_pixels:
+            rstart = rindex - dist
+            rstop = rindex + dist + 1
+            if rstart < 0:
+                rstart = 0
+
+            if rstop > self.height - 1:
+                rstop = self.height - 1
+
+            cstart = cindex - dist
+            cstop = cindex + dist + 1
+
+            if cstart < 0:
+                cstart = 0
+
+            if cstop > self.width - 1:
+                cstop = self.width - 1
+
+            # np.ones((rstop - rstart, cstop - cstart))
+            new_mask_array[rstart:rstop, cstart:cstop] = 255
+            # for ia in range(rstart, rstop):
+            #     for ib in range(cstart, cstop):
+            #         if (ia, ib) not in new_mask:
+            #             new_mask.add((ia, ib))
+
+        # self.mask_pixels = new_mask
+
+        return new_mask_array
+
+    @staticmethod
+    def dilate(mask):
+        cv2.dilate()
+
+
 class TerrainGen:
     def __init__(self, width=1500, height=1500):
         self.width = width
@@ -49,7 +110,7 @@ class TerrainGen:
         self.components = dict()
         self.terrain = self.create_blank()
 
-    def create_blank(self, value=0, chanels=1):
+    def create_blank(self, value=0.0, chanels=1):
         blank = np.zeros((self.width, self.height, chanels)) + value
         return blank
 
@@ -123,42 +184,17 @@ class TerrainGen:
         Returns:
         2d np.array
         """
-        mask = self.create_blank(chanels=1)
+        mask = set()
         for rindex, row in enumerate(rgb_map):
             for cindex, (blue, green, red) in enumerate(row):
                 if blue >= 10 and (red <= 10 or green <= 10):
-                    mask[rindex, cindex, 0] = 255
-        mask = self.expand_mask(mask, 20)
-        new_terrain = self.apply_filter(terrain, GaussianKernel(55), mask)
-        new_terrain = self.apply_filter(new_terrain, GaussianKernel(11), mask)
+                    mask.add((rindex, cindex))
+
+        mask_ob = Mask(self.width, self.height, mask)
+        mask_arr = mask_ob.expand(20)
+        new_terrain = self.apply_filter(terrain, GaussianKernel(55), mask_arr)
+        new_terrain = self.apply_filter(new_terrain, GaussianKernel(11), mask_arr)
         return new_terrain
-
-    @timeit
-    def expand_mask(self, mask, dist=5):
-        new_mask = mask.copy()
-        for rindex, row in enumerate(mask):
-            for cindex, val in enumerate(row):
-                if val < 1:
-                    continue
-                else:
-                    rstart = rindex - dist
-                    rstop = rindex + dist + 1
-                    if rstart < 0:
-                        rstart = 0
-
-                    if rindex > self.height - 1:
-                        rstop = self.height - 1
-
-                    cstart = cindex - dist
-                    cstop = cindex + dist + 1
-                    if cstart < 0:
-                        cstart = 0
-
-                    if cindex > self.width - 1:
-                        cstop = self.width - 1
-
-                new_mask[rstart:rstop, cstart:cstop] = 255
-        return new_mask
 
     @timeit
     def apply_filter(self, terrain, kernel, mask=None):
@@ -195,8 +231,8 @@ class TerrainGen:
                     application[rindex, cindex, 1] = 255
                     val = (scrap * kernel).sum() / factor
                 output[rindex, cindex, 0] = val
-        self.components['application'] = application
 
+        self.components['application'] = application
         return output
 
     @timeit
@@ -333,7 +369,9 @@ if __name__ == "__main__":
     g1.create_perlin(step_size=0.008)
     g1.save()
     tend = time.time()
-    for key, records in function_stats.items():
-        print(f"{key:<25} average: {np.mean(records):>4.4f} s")
 
-    print(f"{tend - t0:>4.1f} s")
+    for key, records in function_stats.items():
+        print(f"{key:<25} average: {len(records):>3}x {np.mean(records):>4.4f}s \t"
+              f"sum: {np.sum(records):>4.2f}s")
+
+    print(f"Whole program took: {tend - t0:>4.1f} s")
