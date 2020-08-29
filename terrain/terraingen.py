@@ -53,72 +53,11 @@ def GaussianKernel(size=11):
 #     return arr
 
 
-class Mask:
-    def __init__(self, width, height, mask=None):
-        self.width = width
-        self.height = height
-
-        if type(mask) is set:
-            self.mask_pixels = mask
-        elif mask is None:
-            self.mask_pixels = set()
-        else:
-            raise NotImplemented("Accepting only set of [row, col] pixes")
-
-        # elif type(mask) is list or type(mask) is np.ndarray:
-        #     self.mask_array = mask
-        #     self.mask_pixels = self.get_mask_array()
-
-    @timeit
-    def get_mask_array(self):
-        mask = np.zeros((self.width, self.height, 1))
-        for row, col in self.mask_pixels:
-            mask[row, col, 0] = 1
-        return mask
-
-    @timeit
-    def expand(self, dist=5):
-        new_mask_array = np.zeros((self.width, self.height, 1))
-        for rindex, cindex in self.mask_pixels:
-            rstart = rindex - dist
-            rstop = rindex + dist + 1
-            if rstart < 0:
-                rstart = 0
-
-            if rstop > self.height - 1:
-                rstop = self.height - 1
-
-            cstart = cindex - dist
-            cstop = cindex + dist + 1
-
-            if cstart < 0:
-                cstart = 0
-
-            if cstop > self.width - 1:
-                cstop = self.width - 1
-
-            # np.ones((rstop - rstart, cstop - cstart))
-            new_mask_array[rstart:rstop, cstart:cstop] = 255
-            # for ia in range(rstart, rstop):
-            #     for ib in range(cstart, cstop):
-            #         if (ia, ib) not in new_mask:
-            #             new_mask.add((ia, ib))
-
-        # self.mask_pixels = new_mask
-
-        return new_mask_array
-
-    @staticmethod
-    def dilate(mask):
-        cv2.dilate()
-
-
 class TerrainGen:
     def __init__(self, width=1500, height=1500):
         self.width = width
         self.height = height
 
-        self.terrain = None
         self.bgr = None
         self.components = dict()
         self.terrain = self.create_blank()
@@ -129,37 +68,50 @@ class TerrainGen:
 
     @timeit
     def create_random(self):
-        self.terrain = np.random.random((self.width, self.height))
+        terrain = np.random.random((self.width, self.height, 1))
+        return terrain
 
     @timeit
-    def create_trigon(self):
-        self.create_random()
-        for x in range(1, 11):
-            self.add_trigon_noise(factors=x + 1,
-                                  stepsize=1e-3, amplitude=10 / x)
-        self.terrain = self.blur_terrain(self.terrain)
-        self.terrain = self.normalize_terrain()
+    def create_trigon(self, seed=None, point=None):
+        # if seed is None:
+        #     seed = np.random.randint(0, 1e3)
 
-    @timeit
-    def create_my_map(self):
+        # print(f"Seed: {seed}, Offset: {offsetx}, {offsety}")
+
         self.terrain = self.create_blank()
-        noise = self.my_noise()
-        for rindex, row in enumerate(self.terrain):
-            new_row = self.moving_filter_1d(row, kernel=noise)
-            self.terrain[rindex] = new_row
+        N = 8
+        for x in range(1, 6):
+            pointx, pointy = np.random.random(2) * 5 + 1
+            land0 = self.get_trigon_noise(factors=N, x0=pointx, y0=pointy, stepsize=1e-3, amplitude=10 / x)
+            land1 = self.get_trigon_noise(factors=N, x0=pointx, y0=pointy, stepsize=0.5e-3, amplitude=3 / x)
+            self.terrain += land0 + land1
+        # moutains = self.get_trigon_noise(factors=3, start_point=point, stepsize=1e-3, amplitude=2)
+        # rocks = self.get_trigon_noise(factors=3, start_point=point, stepsize=1e-3, amplitude=2)
+        # river = self.get_trigon_noise(factors=3, start_point=point, stepsize=1e-3, amplitude=2)
 
-        self.terrain = self.normalize_terrain()
+        self.terrain = self.normalize_terrain(self.terrain)
+        self.bgr = self.get_color_map(self.terrain)
+
+    # @timeit
+    # def create_my_map(self):
+    #     self.terrain = self.create_blank()
+    #     noise = self.my_noise()
+    #     for rindex, row in enumerate(self.terrain):
+    #         new_row = self.moving_filter_1d(row, kernel=noise)
+    #         self.terrain[rindex] = new_row
+    #
+    #     self.terrain = self.normalize_terrain()
 
     @timeit
-    def add_trigon_noise(self, factors=2, stepsize=1e-3, start_point=1e6, amplitude=1.0):
-        factors = np.random.random((2, factors)) * 2 - 1
-        xval = [self.get_sin_x(*factors[0], x0=start_point + i, stepsize=stepsize) for i in range(self.width)]
-        yval = [self.get_sin_x(*factors[1], x0=start_point + i, stepsize=stepsize) for i in range(self.height)]
+    def get_trigon_noise(self, factors=2, stepsize=1e-3, x0=1e6, y0=1e6, amplitude=1.0):
+        factors = np.random.random((2, factors)) * 2
+        xval = [self.get_sin_x(*factors[0], x0=x0 + i * stepsize) for i in range(self.width)]
+        yval = [self.get_sin_x(*factors[1], x0=y0 + i * stepsize) for i in range(self.height)]
 
         XX, YY = np.meshgrid(xval, yval)
         ZZ = XX * YY
-
-        self.terrain += ZZ * amplitude
+        ZZ = ZZ.reshape(*ZZ.shape, -1) * amplitude
+        return ZZ
 
     @timeit
     def create_perlin(self, step_size=0.1, seed=None, offsetx=0, offsety=0):
@@ -170,15 +122,16 @@ class TerrainGen:
             offsetx, offsety = np.random.randint(0, 1e4, 2)
         print(f"Seed: {seed}, Offset: {offsetx}, {offsety}")
 
-        mountain = self.get_perlin_noise(0.4, step_size, seed, offsetx, offsety) * 255
+        mountain = self.get_perlin_noise(0.2, step_size, seed, offsetx, offsety) * 255
         rocks = self.get_perlin_noise(0.03, step_size * 4, seed + 1, offsetx, offsety) * 255
         river = self.get_perlin_noise(0.8, step_size / 2, seed + 2, offsetx, offsety) * 255
 
         self.components = dict(mountain=mountain, rocks=rocks, river=river)
-        terrain = self.create_blank(0.5) + mountain + rocks - river
-        self.terrain = self.normalize_terrain(terrain)
+        terrain = self.create_blank(0.5) + mountain + rocks + river
 
+        self.terrain = self.normalize_terrain(terrain)
         self.bgr = self.get_color_map(self.terrain)
+
         new_terrain = self.work_on_terrain(self.bgr, self.terrain)
         bgr_new = self.get_color_map(new_terrain)
 
@@ -195,7 +148,7 @@ class TerrainGen:
             terrain:
 
         Returns:
-        2d np.array
+        2D np.array
         """
         red_mask = bgr_map[:, :, 2] <= 10
         green_mask = bgr_map[:, :, 1] <= 10
@@ -204,7 +157,7 @@ class TerrainGen:
         mask_bool = np.logical_and(blue_mask, np.logical_or(red_mask, green_mask))
         mask = mask_bool * 255
 
-        mask = np.array(mask, dtype=np.uint8).reshape(*mask.shape, 1)
+        mask = np.array(mask, dtype=np.float).reshape(*mask.shape, 1)
         new_terrain = self.apply_filter(terrain, GaussianKernel(33), mask)
 
         dil_kernel = cv2.getStructuringElement(cv2.MORPH_DILATE, (25, 25))
@@ -253,33 +206,33 @@ class TerrainGen:
         self.components['application'] = application
         return output
 
-    @timeit
-    def moving_filter_1d(self, series, kernel):
-        # new_series = []
-        for index, value in enumerate(series):
-            new_val = kernel[0]
-            for prev_ind, factor in enumerate(kernel):
-                index2 = index - prev_ind
-                if index2 < 0:
-                    break
-                elif index2 == index:
-                    continue
-                offset = series[index2] * factor
-                # print(index2, series[index2])
-                new_val += offset / prev_ind
+    # @timeit
+    # def moving_filter_1d(self, series, kernel):
+    #     # new_series = []
+    #     for index, value in enumerate(series):
+    #         new_val = kernel[0]
+    #         for prev_ind, factor in enumerate(kernel):
+    #             index2 = index - prev_ind
+    #             if index2 < 0:
+    #                 break
+    #             elif index2 == index:
+    #                 continue
+    #             offset = series[index2] * factor
+    #             # print(index2, series[index2])
+    #             new_val += offset / prev_ind
+    #
+    #         series[index] = new_val
+    #     # print(new_series)
+    #     return np.array(series)
 
-            series[index] = new_val
-        # print(new_series)
-        return np.array(series)
-
     @timeit
-    def get_sin_x(self, *coeffs, x0, stepsize, ):
+    def get_sin_x(self, *coeffs, x0, ):
         out = 0
         for rank, cf in enumerate(coeffs):
             if rank == 0:
                 out = cf
             else:
-                out += np.sin((x0 * stepsize) ** cf) / rank
+                out += np.sin((x0) ** cf) / rank
         if out > 1:
             out = 1
         return out
@@ -359,7 +312,7 @@ class TerrainGen:
         terrain_bgr = np.concatenate([self.terrain] * 3, axis=-1)
 
         if self.bgr is not None:
-            cv2.imwrite("map_rgb.png", self.bgr)
+            cv2.imwrite("map_bgr.png", self.bgr)
             stacked = np.concatenate([self.bgr, terrain_bgr], axis=1)
         else:
             stacked = terrain_bgr
@@ -383,13 +336,14 @@ class TerrainGen:
 
 if __name__ == "__main__":
     t0 = time.time()
-    g1 = TerrainGen(400, 400)
+    g1 = TerrainGen(300, 300)
     g1.create_perlin(step_size=0.008)
+    # g1.create_trigon()
     g1.save()
     tend = time.time()
 
     for key, records in function_stats.items():
-        print(f"{key:<25} average: {len(records):>3}x {np.mean(records):>4.4f}s \t"
+        print(f"{key:<25} average: {len(records):>5}x {np.mean(records):>4.4f}s \t"
               f"sum: {np.sum(records):>4.2f}s")
 
     print(f"Whole program took: {tend - t0:>4.1f} s")
