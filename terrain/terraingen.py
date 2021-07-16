@@ -438,7 +438,7 @@ class TerrainGen:
             cv2.imwrite(f"{name}.png", im)
 
 
-def dynamic_tile_merge(t1, t2, axis=0, upscale=True, smooth_length=0.1):
+def _dynamic_tile_merge(t1, t2, axis=0, upscale=True, smooth_length=0.1):
     h, w, *c = t1.shape
     assert t1.shape == t2.shape, "Function works only on same tile sizes"
 
@@ -507,30 +507,33 @@ def dynamic_tile_merge(t1, t2, axis=0, upscale=True, smooth_length=0.1):
     return t1
 
 
-def stack_tiles(tiles, h, w):
+def smooth_tiles_merge(tiles, h, w, smooth_length=0.1):
     t1 = tiles[0]
     t2 = tiles[1]
 
-    # tl = np.vstack([t1, t2])
-    tl = dynamic_tile_merge(t1, t2, upscale=True, smooth_length=0.1)
+    tl = _dynamic_tile_merge(t1, t2, upscale=True, smooth_length=smooth_length)
     tl = TerrainGen.normalize_terrain(tl)
     return tl
 
 
-def flaterizer(tl):
-    flat_margin = 10
+def flaterizer(tl, K=6, margin_scale=0.35):
+    flat_margin = 255 / K / 2
+    flat_margin = flat_margin * margin_scale
     _X = np.ones_like(tl)
     # X = np.argwhere(_X)
     X = tl.ravel().reshape(-1, 1)
     # vals = tl.ravel()
-    km = KMeans(2)
+    km = KMeans(K)
     km.fit(X)
 
-    centers = km.cluster_centers_[0]
+    centers = km.cluster_centers_[:, 0]
 
-    # for cent in centers:
-    #     mask = np.absolute(tl - cent) <= flat_margin
-    #     tl[mask] = cent
+    for cent in centers:
+        mask = np.absolute(tl - cent) <= flat_margin
+        # mk = np.array(mask, dtype=np.uint8)*255
+        # cv2.imshow("mask", mk)
+        # cv2.waitKey()
+        tl[mask] = cent
 
     return tl
 
@@ -559,7 +562,7 @@ def clear_png():
 
 
 def export_stack(n=2, gap=3):
-    h, w = 100, 300
+    h, w = 100, 400
     g1 = TerrainGen(w, h)
     mat = np.zeros(
             (h * n + gap * (n - 1),
@@ -567,7 +570,7 @@ def export_stack(n=2, gap=3):
              3)
     )
     N = n * n
-    tiles = g1.make_tiles(N, 0.02, 10, h=h, w=w, faster=3)
+    tiles = g1.make_tiles(N, 0.02, "a", h=h, w=w, faster=3)
     ret = tiles.copy()
     for r_ind in range(n):
         for c_ind in range(n):
@@ -586,9 +589,13 @@ def export_stack(n=2, gap=3):
 if __name__ == "__main__":
 
     tiles = export_stack()
-    stk1 = stack_tiles(tiles[:2], 2, 1)
-    stk2 = stack_tiles(tiles[2:], 2, 1)
-    stk = stack_tiles([stk1, stk2], 2, 1)
+    stk1 = smooth_tiles_merge(tiles[:2], 2, 0.2)
+    stk2 = np.flip(stk1)
+    # stk2 = stack_tiles(tiles[2:], 2, 1)
+    # stk = stack_tiles([stk1, stk2], 2, 1)
+    stk = smooth_tiles_merge([stk1, stk2], 2, 1, 0.2)
+    # stk = flaterizer(stk1)
+
     cv2.imwrite("stacked.png", stk)
     stk_col = TerrainGen.get_color_map(stk)
     cv2.imwrite("stacked_color.png", stk_col)
